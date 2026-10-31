@@ -1,0 +1,16 @@
+
+scan_interval:      "120s"
+scan_workers:       2
+scan_timeout:       "90s"
+discovery_interval: "6h"
+
+max_stat_files:     5000
+max_files_per_dir:  0
+
+targets:
+  - base: /home/bobby/Documents/streams
+    label: /streams
+    pattern: "*/nodes/*/#include/*"
+    include: [ "input" , "output" , "discarded" , "rejected" ]
+
+tracelog_dir: /home/bobby/Documents/EventLinkTraceLogs
