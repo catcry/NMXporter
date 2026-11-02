@@ -1,0 +1,17 @@
+# Build output
+dist/
+
+# Go
+*.test
+*.out
+*.exe
+
+# Local config and secrets
+.env
+*.password
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

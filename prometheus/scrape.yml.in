@@ -1,0 +1,31 @@
+# Prometheus scrape jobs for the EventLink exporters on @HOST@ (written by install.sh).
+# Add under scrape_configs: of prometheus.yml and reload Prometheus.
+#
+# The job names are used by the dashboard and the alert rules: keep them.
+# The eventlink label names this EventLink server; use the same value on all
+# three jobs. For another server, add its targets with another eventlink value
+# (one static_configs entry per server).
+
+  - job_name: directory-exporter
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: [ "@HOST@:@PORT_DIR@" ]
+        labels:
+          eventlink: "@SERVER_NAME@"
+
+  - job_name: eventlink-trace-exporter
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: [ "@HOST@:@PORT_TRACE@" ]
+        labels:
+          eventlink: "@SERVER_NAME@"
+
+  - job_name: eventlink-db-exporter
+    scrape_interval: 60s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: [ "@HOST@:@PORT_DB@" ]
+        labels:
+          eventlink: "@SERVER_NAME@"

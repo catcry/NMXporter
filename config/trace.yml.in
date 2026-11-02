@@ -1,0 +1,37 @@
+# eventlink-trace-exporter configuration (written by install.sh; edit freely).
+# EventLink execution trace logs: files and records per node, failures,
+# collected -> distributed delay (by file name and by file ID), pending files,
+# last collected / distributed time.
+# Reference: MANUAL.md, section "eventlink-trace-exporter".
+
+listen_addr: ":@PORT_TRACE@"
+tracelog_dir: @TRACELOG_DIR@
+
+# Same value as directory-exporter's target label.
+base_label: /streams
+
+# How often new trace lines are read.
+poll_interval: "30s"
+
+# false = at startup start at the end of the existing trace files, so a restart
+# never re-reads gigabytes of history. Counters start at 0 at every start.
+backfill: false
+# Trace bytes read per poll at most; the rest is read on the next poll.
+# (Stress test: a 1 GB burst was read in 10 s at 1024, in 36 s at 256.)
+max_read_mb: 1024
+
+# At startup, read the trace files of the last seed_days days once (newest
+# first, at most seed_max_mb per stream) only for each node's last collected /
+# distributed time, so quiet streams show it right away.
+seed_days: 7
+seed_max_mb: 1024
+
+# Collected file names (part before the first ".") kept to match later
+# "Distributed file" lines. ~190 MB of memory at 500000 names; lower it on a
+# small server. Older or extra names fall back to the collection time in the file ID.
+name_ttl: "24h"
+max_names: 500000
+
+log_file: "./trace-exporter.log"
+log_max_size_mb: 10
+log_keep: 3

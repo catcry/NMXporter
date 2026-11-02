@@ -1,0 +1,159 @@
+# Prometheus alert rules for the EventLink exporters (directory-exporter,
+# eventlink-trace-exporter, eventlink-db-exporter).
+#
+# Every rule groups and joins by the "eventlink" label (set per EventLink server
+# in scrape.yml), so several servers can share one Prometheus.
+# Load with:  rule_files: [ "/etc/prometheus/rules/eventlink-alerts.yml" ]
+# Check with: promtool check rules alerts.yml
+
+groups:
+  - name: eventlink-exporters
+    rules:
+      - alert: DirectoryExporterDown
+        expr: up{job="directory-exporter"} == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] directory-exporter on {{ $labels.instance }} is not reachable"
+          description: "Prometheus cannot scrape the exporter: buffer, queue and node monitoring of this EventLink server is blind."
+
+      - alert: DirectoryExporterStale
+        expr: time() - directory_last_scan_timestamp_seconds > 600
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] directory-exporter data is {{ $value | humanizeDuration }} old"
+          description: "The exporter answers but has not finished a scan cycle for more than 10 minutes."
+
+      - alert: TraceExporterDown
+        expr: up{job="eventlink-trace-exporter"} == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] eventlink-trace-exporter on {{ $labels.instance }} is not reachable"
+          description: "Trace log metrics (file counts, collected -> distributed delay, failures) are missing; buffer monitoring is not affected."
+
+      - alert: DBExporterDown
+        expr: up{job="eventlink-db-exporter"} == 0 or eventlink_db_up == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] eventlink-db-exporter cannot read the EventLink database"
+          description: "Either Prometheus cannot scrape the exporter, or the exporter's database poll fails (see eventlink_db_query_errors_total and its log)."
+
+      - alert: ExporterMemoryHigh
+        # 80 % of the hard limits set by the control script (MAX_RSS_MB).
+        expr: |
+          (process_resident_memory_bytes{job="directory-exporter"} > 0.8 * 256 * 1048576)
+          or (process_resident_memory_bytes{job="eventlink-trace-exporter"} > 0.8 * 768 * 1048576)
+          or (process_resident_memory_bytes{job="eventlink-db-exporter"} > 0.8 * 128 * 1048576)
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] {{ $labels.job }} uses {{ $value | humanize1024 }}B of memory"
+          description: "Close to its MAX_RSS_MB limit; at the limit the exporter stops and the watchdog restarts it."
+
+      - alert: ExporterRestarting
+        expr: changes(process_start_time_seconds[1h]) > 2
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] {{ $labels.job }} restarted {{ $value }} times in 1h"
+          description: "Look for 'resident memory above MAX_RSS_MB' or other errors in the exporter's log and .out file."
+
+  - name: eventlink-nodemanager
+    rules:
+      - alert: EventLinkNodeManagerDown
+        # EventLink's own rule: el_component_status is R and was updated in the last 2m30s.
+        expr: eventlink_nodemanager_up == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] EventLink Node Manager on {{ $labels.host }} is down"
+          description: "No node supervision, no trace logs; node status, events and reporting in the database are frozen. Nodes may still run (see directory_node_up)."
+
+      - alert: EventLinkNodeFailedDB
+        # A new failure event (NODEMANAGER03011 aborted and was disabled, NODEMANAGER03023).
+        expr: changes(eventlink_db_node_last_failure_timestamp_seconds[10m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] EventLink node {{ $labels.stream }} / {{ $labels.node }} failed"
+          description: "Reported by EventLink in el_events; the reason is in eventlink_db_node_last_error_info."
+
+  - name: eventlink-nodes
+    rules:
+      - alert: EventLinkNodeStopped
+        # Down now, but running at some point in the last 24h: nodes switched off long ago do not alert.
+        expr: (directory_node_up == 0) and on(eventlink, stream, node) (max_over_time(directory_node_up[24h]) == 1)
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] EventLink node {{ $labels.stream }} / {{ $labels.node }} stopped"
+          description: "Heartbeat deadline in control/1/heartbeat has passed."
+
+      - alert: EventLinkNodeFailed
+        expr: increase(directory_node_failures_total[10m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] EventLink node {{ $labels.stream }} / {{ $labels.node }} failed"
+          description: "Trace log reports 'aborted and was disabled' or 'Node index ... failed'."
+
+      - alert: EventLinkQueueStuck
+        # Input files older than 1h for a node that is running (a stopped node alerts as stopped).
+        expr: |
+          (label_replace(time() - directory_oldest_file_timestamp_seconds{type=~"[^/]+/input/.+"}, "node", "$1", "type", "([^/]+)/.*") > 3600)
+            and on(eventlink, stream, node) (directory_node_up == 1)
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] Files waiting over 1h in {{ $labels.stream }} / {{ $labels.type }}"
+          description: "The consuming node is running but does not empty its input queue."
+
+      - alert: EventLinkCollectorIdle
+        expr: (directory_collector_delay_seconds > 3600) and on(eventlink, stream, node) (directory_node_up == 1)
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] Collector {{ $labels.stream }} / {{ $labels.node }} idle for {{ $value | humanizeDuration }}"
+          description: "Running collector has not collected a file for over 1h (the source may have stopped sending)."
+
+  - name: eventlink-streams
+    rules:
+      - alert: EventLinkLiveDelayHigh
+        # Oldest waiting input file (collection time from its EventLink ID, else file mtime) older
+        # than 30 min, for nodes running now or in the last 24h.
+        expr: |
+          max by (eventlink, stream, node) (label_replace(
+              (time() - directory_queue_oldest_collected_timestamp_seconds{type=~"[^/]+/input/.+"})
+              or (time() - (directory_oldest_file_timestamp_seconds{type=~"[^/]+/input/.+"} and on(eventlink, base, stream, type) directory_file_count{type=~"[^/]+/input/.+"} > 0)),
+            "node", "$1", "type", "([^/]+)/.*"))
+            > 1800
+          and on(eventlink, stream, node) (max_over_time(directory_node_up[24h]) == 1)
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] Stream {{ $labels.stream }} / {{ $labels.node }}: oldest waiting file is {{ $value | humanizeDuration }} old"
+          description: "Files are waiting in the node's input queue longer than 30 minutes (live delay, from the buffer folders)."
+
+      - alert: EventLinkStreamDelayHigh
+        expr: histogram_quantile(0.95, sum by (eventlink, stream, le) (rate(eventlink_name_latency_seconds_bucket[15m]))) > 1800
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] Stream {{ $labels.stream }}: collected -> distributed p95 is {{ $value | humanizeDuration }}"
+          description: "95% of files take longer than 30 minutes from collection to distribution (trace logs, matched by file name)."
+
+      - alert: EventLinkTraceLoggingStopped
+        # The Node Manager writes a trace line every minute; none on the whole server for 10 min.
+        expr: time() - max by (eventlink) (directory_tracelog_last_line_timestamp_seconds) > 600
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] No EventLink trace log line for {{ $value | humanizeDuration }}"
+          description: "The Node Manager writes trace logs; if they stop, it has probably stopped (see EventLinkNodeManagerDown). Trace-based metrics are frozen."
+
+      - alert: EventLinkDiscardsRising
+        expr: |
+          sum by (eventlink, stream) (clamp_min(directory_file_count{type=~"[^/]+/discarded(/.+)?"} - directory_file_count{type=~"[^/]+/discarded(/.+)?"} offset 1h, 0)) > 100
+        labels: { severity: warning }
+        annotations:
+          summary: "[{{ $labels.eventlink }}] Stream {{ $labels.stream }}: {{ $value }} files discarded in the last hour"

@@ -1,0 +1,30 @@
+# systemd unit for @NAME@ (written by install.sh; installing it needs root):
+#   cp @NAME@.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now @NAME@
+# Remove the cron watchdog lines for @NAME@ first (install.sh --cron added them).
+[Unit]
+Description=EventLink @NAME@ (Prometheus exporter)
+After=network-online.target
+
+[Service]
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@DIR@
+Environment=CONFIG_FILE=./@CONF@
+Environment=GOMAXPROCS=@PROCS@
+Environment=GOMEMLIMIT=@MEM@
+Environment=MAX_RSS_MB=@RSS@
+ExecStart=@DIR@/@NAME@
+Restart=always
+RestartSec=10
+# Lowest priority: EventLink always gets CPU and disk first.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# Hard caps by the kernel (MemoryLimit for systemd < 231, e.g. CentOS 7).
+MemoryLimit=@RSS@M
+CPUQuota=@CPUQUOTA@%
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

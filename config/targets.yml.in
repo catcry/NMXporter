@@ -1,0 +1,57 @@
+# directory-exporter configuration (written by install.sh; edit freely).
+# Folders, queues and node status of EventLink: file counts, oldest/newest file,
+# collection time from EventLink file IDs, heartbeat, collector/distributor activity.
+# Reference: MANUAL.md, section "directory-exporter".
+
+listen_addr: ":@PORT_DIR@"
+
+# How often every watched folder is read, by how many workers, and how long
+# one cycle may take before partial results are published.
+scan_interval:      "120s"
+scan_workers:       2
+scan_timeout:       "90s"
+# How often the folder list is discovered again (new streams, nodes, queues).
+discovery_interval: "6h"
+
+# 0 = stat every file: exact oldest/newest timestamps. A sampled value
+# (e.g. 5000) was wrong by 34 minutes on a 1M-file queue in the stress test.
+max_stat_files:     0
+# A folder whose file list did not change since the last cycle is not read
+# again (its result is reused) for at most this long. 0 = always read.
+unchanged_rescan_interval: "10m"
+# 0 = count every file.
+max_files_per_dir:  0
+
+# Bearer token for POST /-/reload (rediscover + rescan now):
+#   curl -X POST -H "Authorization: Bearer <secret>" localhost:@PORT_DIR@/-/reload
+reload_secret: "@RELOAD_SECRET@"
+
+targets:
+  # Queue folders: <stream>/nodes/<node>/<input|output|discarded|rejected>/<queue>
+  - base: @STREAMS_DIR@
+    label: /streams
+    pattern: "*/nodes/*/#include/*"
+    include: [ "input" , "output" , "discarded" , "rejected" ]
+
+  # Files lying directly in discarded/ and rejected/ (not in a subfolder),
+  # exported as type="<node>/discarded" and type="<node>/rejected".
+  - base: @STREAMS_DIR@
+    label: /streams
+    pattern: "*/nodes/*/#include"
+    include: [ "discarded" , "rejected" ]
+
+# Trace logs, used for the distributors' last distributed file (looked back
+# trace_lookback_days days). Counters and delays come from eventlink-trace-exporter.
+tracelog_dir: @TRACELOG_DIR@
+trace_lookback_days: 7
+
+# Collector / distributor "idle" delay is reported only above this.
+min_delay: "600s"
+
+# A node is down once its heartbeat deadline (control/1/heartbeat) is older than this.
+heartbeat_grace: "120s"
+
+# The exporter writes and rotates its own log (no logrotate or root needed).
+log_file: "./exporter.log"
+log_max_size_mb: 10
+log_keep: 3

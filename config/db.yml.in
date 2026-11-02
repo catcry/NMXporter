@@ -1,0 +1,51 @@
+# eventlink-db-exporter configuration (written by install.sh; edit freely).
+# EventLink's own PostgreSQL database, READ-ONLY: Node Manager status, node
+# status (RUNNING / STOPPED / FAILED), events and errors, collected /
+# distributed files per stream.
+# Reference: MANUAL.md, section "eventlink-db-exporter".
+
+listen_addr: ":@PORT_DB@"
+
+# How often each database is queried. Each poll reads only rows newer than
+# the previous one (events by ID, reporting tables by their time index).
+poll_interval: "60s"
+query_timeout: "20s"
+
+# At startup: newest event / collection / distribution per node and stream
+# of the last seed_days days (not counted), with a longer timeout.
+seed_days: 3650
+seed_timeout: "120s"
+
+# Collected / distributed counters stay this far behind now, so rows the
+# Node Manager writes late are still counted (each row exactly once).
+reporting_lag: "5m"
+max_rows_per_poll: 100000
+
+# Node Manager is up while el_component_status is R and younger than this
+# (EventLink's own rule in el_v_host_nm_status: 2m30s).
+nodemanager_grace: "150s"
+
+# Event keys counted as node failures.
+failure_keys: [ "NODEMANAGER03011", "NODEMANAGER03023" ]
+message_max_len: 200
+
+# One entry per EventLink database. Values not set are read from the optional
+# parameters file (<prefix>_DB_HOST / PORT / NAME / USER / PASSWORD), when one is used.
+# Password order: password, password_env, password_file, parameters file.
+databases:
+  - name: "@SERVER_NAME@"              # value of the "server" label
+@DB_CREDENTIALS@
+    sslmode: disable
+    system_tz_offset: auto             # from el_events.eventtimesystemtz, or e.g. "+03:30"
+
+  # Another EventLink database:
+  # - name: other-server
+  #   host: 10.0.0.12
+  #   port: 5432
+  #   dbname: eventlink
+  #   user: monitor
+  #   password_file: ./other.password
+
+log_file: "./db-exporter.log"
+log_max_size_mb: 10
+log_keep: 3
